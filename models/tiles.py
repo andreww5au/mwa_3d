@@ -1,5 +1,7 @@
 __author__ = 'andrew'
 
+import math
+
 import vpython
 from vpython import color
 from vpython import vector as v
@@ -15,8 +17,23 @@ seltile = None
 tlabel = None
 scene = None
 
+DELAYSTEP = 435.0  # Delay line increment in picoseconds
+C = 0.000299798  # C in meters/picosecond
 
-def getdipole(cpos=None):
+
+def getdipole(cpos=None, badx=None, bady=None):
+    """
+    Return the VPython elements making up a single dipole at position 'cpos'.
+
+    Returns two sets of elements - a complext list, and a simple list, where all elements are initially not
+    visible. The caller should loop over one of the element lists and set them to visible.
+
+    :param cpos: absolute (x,y,z) coordinates of the dipole
+    :param badx: True if the X dipole is bad (draw it in red)
+    :param bady: True if the Y dipole is bad (draw it in red)
+    :return: a tuple of (slist, clist) where clist contains the 'complex' elements (fiddly bits), and
+             slist contains simple alternative versions of the dipole.
+    """
     width = 0.35  # Center to edge of bat-wing
     height = 0.4  # Top of bat-wing corner to ground
     standoff = 0.1  # ground to bottom of bat-wing triangle
@@ -30,31 +47,61 @@ def getdipole(cpos=None):
     elif type(cpos) == tuple:
         cpos = v(cpos)
 
+    if badx is None:
+        xcolor = vpython.color.gray(0.8)
+    elif badx:
+        xcolor = vpython.color.red
+    else:
+        xcolor = vpython.color.green
+
+    if bady is None:
+        ycolor = vpython.color.gray(0.8)
+    elif bady:
+        ycolor = vpython.color.red
+    else:
+        ycolor = vpython.color.green
+
+    xpad = vpython.box(pos=v(0, 0, 0) + cpos,
+                       axis=v(0, 0, 1),
+                       height=width * 0.75,
+                       width=width * 3,
+                       length=standoff,
+                       color=xcolor,
+                       visible=False)
+
+    ypad = vpython.box(pos=v(0, 0, 0.05) + cpos,
+                       axis=v(0, 0, 1),
+                       height=width * 3,
+                       width=width * 0.75,
+                       length=standoff,
+                       color=ycolor,
+                       visible=False)
+
     xl = vpython.box(pos=v(-width, 0, (height + standoff) / 2) + cpos,
                      axis=v(0, 0, 1),
                      height=boxw,
                      width=boxw,
                      length=height + boxw,
-                     color=vpython.color.gray(0.8),
+                     color=xcolor,
                      visible=False)
     xlt = vpython.box(pos=v(0, 0, cpoint.z) + cpos,
                       axis=(v(width, 0, standoff) - v(-width, 0, height)),
                       height=boxw,
                       width=boxw,
-                      color=vpython.color.gray(0.8),
+                      color=xcolor,
                       visible=False)
     xlb = vpython.box(pos=v(0, 0, cpoint.z) + cpos,
                       axis=(v(width, 0, height) - v(-width, 0, standoff)),
                       height=boxw,
                       width=boxw,
-                      color=vpython.color.gray(0.8),
+                      color=xcolor,
                       visible=False)
     xr = vpython.box(pos=v(width, 0, (height + standoff) / 2) + cpos,
                      axis=v(0, 0, 1),
                      height=boxw,
                      width=boxw,
                      length=height + boxw,
-                     color=vpython.color.gray(0.8),
+                     color=xcolor,
                      visible=False)
 
     yl = vpython.box(pos=v(0, -width, (height + standoff) / 2) + cpos,
@@ -62,25 +109,26 @@ def getdipole(cpos=None):
                      height=boxw,
                      width=boxw,
                      length=height + boxw,
-                     color=vpython.color.gray(0.8),
+                     color=ycolor,
                      visible=False)
     ylt = vpython.box(pos=v(0, 0, cpoint.z) + cpos,
                       axis=(v(0, width, standoff) - v(0, -width, height)),
                       height=boxw,
                       width=boxw,
-                      color=vpython.color.gray(0.8),
+                      color=ycolor,
                       visible=False)
     ylb = vpython.box(pos=v(0, 0, cpoint.z) + cpos,
                       axis=(v(0, width, height) - v(0, -width, standoff)),
                       height=boxw,
                       width=boxw,
-                      color=vpython.color.gray(0.8),
+                      color=ycolor,
                       visible=False)
     yr = vpython.box(pos=v(0, width, (height + standoff) / 2) + cpos,
                      axis=v(0, 0, 1),
                      height=boxw,
                      width=boxw,
-                     length=height + boxw, color=vpython.color.gray(0.8),
+                     length=height + boxw,
+                     color=ycolor,
                      visible=False)
 
     lna = vpython.cylinder(pos=v(0, 0, cpoint.z - cylen / 2) + cpos,
@@ -93,7 +141,7 @@ def getdipole(cpos=None):
                             axis=v(0,0,cpoint.z-standoff),
                             color=color.white,
                             visible=False)
-    return [xl, xlt, xlb, xr, yl, ylt, ylb, yr, lna, tube]
+    return [xpad, ypad], [xl, xlt, xlb, xr, yl, ylt, ylb, yr, lna, tube]
 
 
 class Tile():
@@ -101,11 +149,42 @@ class Tile():
     Represents a single MWA tile, ground mesh, and beamformer.
     """
 
-    def __init__(self, cpos=None):
+    def __init__(self,
+                 tile_id=0,
+                 tile_name='',
+                 cpos=None,
+                 xbadlist=None,
+                 ybadlist=None,
+                 receiver_id=None,
+                 slot=None,
+                 azimuth=None,
+                 elevation=None,
+                 delays=None):
         if cpos is None:
             cpos = v(0, 0, 0)
         elif type(cpos) == tuple:
             cpos = v(cpos)
+
+        self.cpos = cpos
+        self.tile_id = tile_id
+        self.tile_name = tile_name
+        self.receiver_id = receiver_id
+        self.slot = slot
+        self.azimuth = azimuth
+        self.elevation = elevation
+
+        if xbadlist is None:
+            xbadlist = []
+
+        if ybadlist is None:
+            ybadlist = []
+
+        if delays is None:
+            self.xdelays = []
+            self.ydelays = []
+        else:
+            self.xdelays = delays[0]
+            self.ydelays = delays[1]
 
         dip_sep = 1.10  # dipole separations in meters
         xoffsets = [0.0] * 16  # offsets of the dipoles in the W-E 'x' direction
@@ -159,156 +238,48 @@ class Tile():
                               length=0.2,
                               color=color.white,
                               visible=False)
-        self.dlist = []
+
+        self.slist = []
+        self.clist = []
         for i in range(16):
-            self.dlist += getdipole(cpos=v(xoffsets[i], yoffsets[i], 0) + cpos)
+            simp, comp = getdipole(cpos=v(xoffsets[i], yoffsets[i], 0) + cpos,
+                                   badx=((i + 1) in xbadlist),
+                                   bady=((i + 1) in ybadlist))
+            if self.xdelays and (self.xdelays[i] != 32)  and (self.xdelays[i] != 0) and (self.azimuth is not None) and (self.elevation is not None):
+                d = v(0, 1, 0)   # North
+                d.rotate(self.elevation * math.pi / 180.0, (-1, 0, 0))  # Rotate 'elevation' degrees around a vector due East
+                d.rotate(self.azimuth * math.pi / 180.0, (0, 0, 1))   # Rotate 'azimuth' degrees around the zenith vector
+                da = vpython.arrow(cpos=v(xoffsets[i], yoffsets[i], 0) + cpos,
+                                   axis=d,
+                                   length=self.xdelays[i] * DELAYSTEP * C,  # Dipole delay in metres, at 'c'
+                                   shaftwidth=0.4,
+                                   fixedwidth=True,
+                                   visible=False)
+                self.clist.append(da)
+            self.slist += simp
+            self.clist += comp
 
     def complex(self):
-        for d in self.dlist:
+        for d in self.clist:
             d.visible = True
+        for d in self.slist:
+            d.visible = False
         self.gp.visible = True
         self.bf.visible = True
 
     def simple(self):
-        for d in self.dlist:
+        for d in self.clist:
             d.visible = False
+        for d in self.slist:
+            d.visible = True
         self.gp.visible = True
         self.bf.visible = False
 
     def none(self):
-        for d in self.dlist:
+        for d in self.clist:
+            d.visible = False
+        for d in self.slist:
             d.visible = False
         self.gp.visible = False
         self.bf.visible = False
 
-
-def plot(tiles=None, pads=None):
-    global simplist, complist, pdict, scene
-    scene.autocenter = False  # Disable autocentering and point the camera at the origin to start
-    scene.center = v(0, 0, 0)
-    scene.show_rendertime = True
-
-    # Draw a transparent grey ground plane, and transparent blue axis arrows and labels
-    ground = vpython.box(pos=v(0, 0, 0), length=3000, height=3000, width=0.1, color=v(0.8, 0, 0), opacity=0.2)
-
-    eaxis = vpython.arrow(pos=v(0, 0, 0), axis=v(1600, 0, 0), color=color.blue, shaftwidth=2, fixedwidth=True,
-                          opacity=0.2)
-    eaxislabel = vpython.label(text='East', pos=v(1580, 20, 0), color=color.blue)
-
-    naxis = vpython.arrow(pos=v(0, 0, 0), axis=v(0, 1600, 0), color=color.blue, shaftwidth=2, fixedwidth=True,
-                          opacity=0.2)
-    naxislabel = vpython.label(text='North', pos=v(20, 1580, 0), color=color.blue)
-
-    #  aaxis = vpython.arrow(pos=(0,0,0), axis=(0,0,100), color=color.blue, shaftwidth=2, fixedwidth=True, opacity=0.2)
-    #  aaxislabel = vpython.label(text='Up', pos=(0,20,80), color=color.blue)
-
-    for tile in tiles:
-        #    complist += gettile(cpos=v(tile.east, tile.north, 0.0))
-        simplist.append(vpython.box(pos=v(tile.east, tile.north, 0.0),
-                                    axis=v(0, 0, 1),
-                                    height=5.0,
-                                    width=5.0,
-                                    length=0.2,
-                                    color=color.green))
-        simplist[-1].name = tile.name
-
-    for pad in pads:
-        pobj = vpython.box(pos=v(pad.east, pad.north, 0.0), length=1.0, height=2.0, width=1.0, color=color.white)
-        if not pad.enabled:
-            pobj.color = v(0.5, 0.5, 0.5)
-        num = int(''.join([c for c in pad.name if c.isdigit()]))
-        if divmod(num, 2)[1] == 0:
-            xoffset = 12
-        else:
-            xoffset = -12
-        if pad.name.endswith('a'):
-            yoffset = -8
-        else:
-            yoffset = 8
-        #    pobj.label = vpython.label(pos=pobj.pos, text=pad.name, xoffset=xoffset, yoffset=yoffset, box=False, line=False, opacity=0.2)
-        pobj.label = vpython.label(pos=v(pobj.pos.x + xoffset, pobj.pos.y + yoffset, pobj.pos.z + 10), text=pad.name,
-                                   height=15)
-        pobj.cables = {}
-        for tname, tdata in pad.inputs.items():
-            tpos = v(tdata[0].east, tdata[0].north, 0.0)
-            cobj = vpython.arrow(pos=pobj.pos, axis=(tpos - pobj.pos), shaftwidth=ARROWWIDTH, fixedwidth=True)
-            pobj.cables[tname] = cobj
-        pdict[pad.name] = pobj
-
-    # Bind mouse click events and key presses to the callback function
-    scene.bind('mousedown', processClick)
-
-
-def update(pad=None, tname=None, fixed=False, color=None):
-    pobj = pdict[pad.name]
-    if fixed:
-        ccolor = vpython.color.orange
-    else:
-        ccolor = vpython.color.white
-    if (color is not None):
-        ccolor = color
-        if (color != v(1.0, 1.0, 1.0)):
-            #      wmult = 3   # only useful for plots showing lightning
-            wmult = 1
-        else:
-            wmult = 1
-    else:
-        wmult = 1
-    if (tname is not None) and (tname in pad.inputs):
-        tpos = v(pad.inputs[tname][0].east, pad.inputs[tname][0].north, 0.0)
-        cobj = vpython.arrow(pos=pobj.pos, axis=(tpos - pobj.pos), shaftwidth=ARROWWIDTH * wmult, fixedwidth=True,
-                             color=ccolor)
-        pobj.cables[tname] = cobj
-    else:
-        for cable in pobj.cables.values():
-            cable.visible = False
-        pobj.cables = {}
-        for tname, tdata in pad.inputs.items():
-            tpos = v(tdata[0].east, tdata[0].north, 0.0)
-            cobj = vpython.arrow(pos=pobj.pos, axis=(tpos - pobj.pos), shaftwidth=ARROWWIDTH * wmult, fixedwidth=True,
-                                 color=ccolor)
-            pobj.cables[tname] = cobj
-
-
-def trunk(pad=None):
-    pobj = pdict[pad.name]
-    trcolor = v(0.0, 0.9, 0.9)
-    trobj = vpython.arrow(pos=v(0, 0, 0), axis=pobj.pos, shaftwidth=ARROWWIDTH * 3, fixedwidth=True, color=trcolor)
-    trobj.visible = True
-
-
-def processClick(event):
-    global seltile, tlabel, scene
-    try:  # Key pressed:
-        s = event.key
-        if s == 'c':
-            for ob in simplist:
-                ob.visible = False
-            for ob in complist:
-                ob.visible = True
-        elif s == 's':
-            for ob in complist:
-                ob.visible = False
-            for ob in simplist:
-                ob.visible = True
-    except AttributeError:  # Mouse clicked:
-        clickedpos = scene.mouse.project(normal=v(0, 0, 1), d=0)  # Mouse position projected onto XY plane
-        if clickedpos:
-            scene.center = clickedpos  # Change the camera centre position
-        ob = scene.mouse.pick
-        try:
-            name = ob.name
-            if seltile is not None:
-                seltile.color = color.green
-                tlabel.visible = False
-                del tlabel
-            seltile = ob
-            seltile.color = color.red
-            tlabel = vpython.label(pos=v(seltile.pos.x, seltile.pos.y, seltile.pos.z + 10), text=name, height=15)
-        except AttributeError:
-            pass
-
-
-def init(width, height):
-    global scene
-    scene = vpython.canvas(title='MWA Tile cabling', width=width, height=height)
