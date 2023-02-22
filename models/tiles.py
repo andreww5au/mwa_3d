@@ -159,7 +159,8 @@ class Tile():
                  slot=None,
                  azimuth=None,
                  elevation=None,
-                 delays=None):
+                 delays=None,
+                 tile_fault=None):
         if cpos is None:
             cpos = v(0, 0, 0)
         elif type(cpos) == tuple:
@@ -185,6 +186,11 @@ class Tile():
         else:
             self.xdelays = delays[0]
             self.ydelays = delays[1]
+
+        if tile_fault:
+            mesh_color = color.red
+        else:
+            mesh_color = color.gray(0.8)
 
         dip_sep = 1.10  # dipole separations in meters
         xoffsets = [0.0] * 16  # offsets of the dipoles in the W-E 'x' direction
@@ -228,7 +234,7 @@ class Tile():
                               height=5.0,
                               width=5.0,
                               length=0.05,
-                              color=color.gray(0.5),
+                              color=mesh_color,
                               visible=False)
 
         self.bf = vpython.box(pos=v(0, -3.5, 0.15) + cpos,
@@ -245,14 +251,15 @@ class Tile():
             simp, comp = getdipole(cpos=v(xoffsets[i], yoffsets[i], 0) + cpos,
                                    badx=((i + 1) in xbadlist),
                                    bady=((i + 1) in ybadlist))
-            if self.xdelays and (self.xdelays[i] != 32)  and (self.xdelays[i] != 0) and (self.azimuth is not None) and (self.elevation is not None):
+            if self.xdelays and (self.xdelays[i] != 32) and (self.xdelays[i] != 0) and (self.azimuth is not None) and (self.elevation is not None):
                 d = v(0, 1, 0)   # North
-                d.rotate(self.elevation * math.pi / 180.0, (-1, 0, 0))  # Rotate 'elevation' degrees around a vector due East
-                d.rotate(self.azimuth * math.pi / 180.0, (0, 0, 1))   # Rotate 'azimuth' degrees around the zenith vector
-                da = vpython.arrow(cpos=v(xoffsets[i], yoffsets[i], 0) + cpos,
+                d = d.rotate(self.elevation * math.pi / 180.0, v(-1, 0, 0))  # Rotate 'elevation' degrees around a vector due East
+                d = d.rotate(self.azimuth * math.pi / 180.0, v(0, 0, 1))   # Rotate 'azimuth' degrees around the zenith vector
+                da = vpython.arrow(pos=v(xoffsets[i], yoffsets[i], -0.2) + cpos,
                                    axis=d,
                                    length=self.xdelays[i] * DELAYSTEP * C,  # Dipole delay in metres, at 'c'
-                                   shaftwidth=0.4,
+                                   shaftwidth=0.2,
+                                   color=color.white,
                                    fixedwidth=True,
                                    visible=False)
                 self.clist.append(da)
